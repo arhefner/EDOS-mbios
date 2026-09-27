@@ -20,90 +20,33 @@
 
 ;define UART_DETECT                     ; use uart if no bit-bang cable
 
-#ifdef 1802MINI
-  #define BRMK         bn2              ; branch on serial mark
-  #define BRSP         b2               ; branch on serial space
-  #define SEMK         seq              ; set serial mark
-  #define SESP         req              ; set serial space
-  #define EXP_PORT     5                ; group i/o expander port
-  #define EXP_MEMORY                    ; enable expansion memory
-  #define IDE_GROUP    0                ; ide interface group
-  #define IDE_SECOND   4                ; ide second interface group
-  #define IDE_SELECT   2                ; ide interface address port
-  #define IDE_DATA     3                ; ide interface data port
-  #define RTC_GROUP    1                ; real time clock group
-  #define RTC_PORT     3                ; real time clock port
-  #define UART_GROUP   0                ; uart port group
-  #define UART_DATA    6                ; uart data port
-  #define UART_STATUS  7                ; uart status/command port
-  #define SPI_GROUP    2
-  #define SPI_CTRL     2
-  #define SPI_DATA     3
-  #define SET_BAUD     19200            ; bit-bang serial fixed baud rate
-  #define FREQ_KHZ     4000             ; default processor clock frequency
+          ; INIT sets where the initialization part is assembled; it may be
+          ; overridden on the command line, e.g. -DINIT=8000h. If MONITOR is
+          ; defined (e.g. -DMONITOR=0f000h), then at the end of initializa-
+          ; tion, control passes to a monitor at that address instead of
+          ; booting from disk.
+
+#ifndef INIT
+#define INIT           0f000h           ; initialization part origin
 #endif
 
-#ifdef SUPERELF
-  #define BRMK         bn2              ; branch on serial mark
-  #define BRSP         b2               ; branch on serial space
-  #define SEMK         seq              ; set serial mark
-  #define SESP         req              ; set serial space
-  #define EXP_PORT     5                ; group i/o expander port
-  #define EXP_MEMORY                    ; enable expansion memory
-  #define IDE_GROUP    0                ; ide interface group
-  #define IDE_SECOND   4                ; ide second interface group
-  #define IDE_SELECT   2                ; ide interface address port
-  #define IDE_DATA     3                ; ide interface data port
-  #define RTC_GROUP    1                ; real time clock group
-  #define RTC_PORT     3                ; real time clock port
-  #define UART_GROUP   0                ; uart port group
-  #define UART_DATA    6                ; uart data port
-  #define UART_STATUS  7                ; uart status/command port
-  #define SPI_GROUP    2
-  #define SPI_CTRL     2
-  #define SPI_DATA     3
-  #define SET_BAUD     9600             ; bit-bang serial fixed baud rate
-  #define FREQ_KHZ     1790             ; default processor clock frequency
+          ; RESIDENT sets where the resident part is assembled. This is only
+          ; for testing a build in RAM, since the standard entry points need
+          ; to be at F800-FFFF. For the same reason, NO_EXP_MEMORY disables
+          ; switching banked RAM on and off, which would unmap the test code.
+
+#ifndef RESIDENT
+#define RESIDENT       0f800h           ; resident part origin
 #endif
 
-#ifdef RC1802
-  #define BRMK         bn3              ; branch on serial mark
-  #define BRSP         b3               ; branch on serial space
-  #define SEMK         seq              ; set serial mark
-  #define SESP         req              ; set serial space
-  #define EXP_PORT     1                ; group i/o expander port
-  #define IDE_GROUP    0                ; ide interface group
-  #define IDE_SELECT   2                ; ide interface address port
-  #define IDE_DATA     3                ; ide interface data port
-  #define UART_GROUP   1                ; uart port group
-  #define UART_DATA    2                ; uart data port
-  #define UART_STATUS  3                ; uart status/command port
-  #define RTC_GROUP    2                ; real time clock group
-  #define RTC_PORT     3                ; real time clock port
-  #define SET_BAUD     9600             ; bit-bang serial fixed baud rate
-  #define FREQ_KHZ     2000             ; default processor clock frequency
-#endif
+#include sysconfig.inc
 
-#ifdef TEST
-  #define BRMK         bn2              ; branch on serial mark
-  #define BRSP         b2               ; branch on serial space
-  #define SEMK         seq              ; set serial mark
-  #define SESP         req              ; set serial space
-  #define EXP_PORT     5                ; group i/o expander port
-  #define IDE_GROUP    1                ; ide interface group
-  #define IDE_SELECT   2                ; ide interface address port
-  #define IDE_DATA     3                ; ide interface data port
-  #define UART_GROUP   4                ; uart port group
-  #define UART_DATA    6                ; uart data port
-  #define UART_STATUS  7                ; uart status/command port
-  #define RTC_GROUP    2                ; real time clock group
-  #define RTC_PORT     3                ; real time clock port
-  #define FREQ_KHZ     4000             ; default processor clock frequency
+#ifdef NO_EXP_MEMORY
+  #undef EXP_MEMORY
 #endif
 
 
-
-            ; SCALL Register Usage
+          ; SCALL Register Usage
 
 scall:      equ   r4
 sret:       equ   r5
@@ -113,7 +56,9 @@ sret:       equ   r5
 
 findtkn:    equ   0030h                 ; jump vector for f_findtkn
 idnum:      equ   0033h                 ; jump vector for f_idnum
-ocrreg:     equ   003bh
+contype:    equ   0036h                 ; console output vector (lbr)
+conread:    equ   0039h                 ; console input vector (lbr)
+ocrreg:     equ   004bh                 ; saved sd card ocr register byte
 devbits:    equ   003ch                 ; f_getdev device present result
 clkfreq:    equ   003eh                 ; processor clock frequency in khz
 lastram:    equ   0040h                 ; f_freemem last ram address result
@@ -123,14 +68,6 @@ diskmap:    equ   0043h
 scratch:    equ   0080h                 ; pre-boot scratch buffer memory
 stack:      equ   00ffh                 ; top of temporary booting stack
 sector:     equ   0100h                 ; address to load boot block to
-
-
-            ; Elf/OS Kernel Variables
-
-o_wrmboot:  equ   0303h                 ; kernel warm-boot reinitialization
-k_clkfreq:  equ   0470h                 ; processor clock frequency in khz
-
-
 
 
             ; Bits in CF interface address port
@@ -210,16 +147,16 @@ k_clkfreq:  equ   0470h                 ; processor clock frequency in khz
           ; are to be sent using SENDBLK for read or write commands, or
           ; SENDCMD for others, either of which will create the rest.
 
-#define SD_CMD0    sendpkt,40h,0,0,0,0,95h
-#define SD_CMD8    sendpkt,48h,0,0,1,5,8fh
-#define SD_CMD9    sendcmd,49h
-#define SD_CMD10   sendcmd,4ah
-#define SD_CMD13   sendcmd,4dh
-#define SD_CMD17   sendblk,51h
-#define SD_CMD24   sendblk,58h
-#define SD_ACMD41  sendpkt,69h,40h,0,0,0,1
-#define SD_CMD55   sendcmd,77h
-#define SD_CMD58   sendcmd,7ah
+#define SD_CMD0    sendpkt.0,40h,0,0,0,0,95h
+#define SD_CMD8    sendpkt.0,48h,0,0,1,5,8fh
+#define SD_CMD9    sendcmd.0,49h
+#define SD_CMD10   sendcmd.0,4ah
+#define SD_CMD13   sendcmd.0,4dh
+#define SD_CMD17   sendblk.0,51h
+#define SD_CMD24   sendblk.0,58h
+#define SD_ACMD41  sendpkt.0,69h,40h,0,0,0,1
+#define SD_CMD55   sendcmd.0,77h
+#define SD_CMD58   sendcmd.0,7ah
 
 
 
@@ -232,13 +169,14 @@ k_clkfreq:  equ   0470h                 ; processor clock frequency in khz
 
           ; The BIOS is divided into two parts, an always-resident part
           ; from F800-FFFF that is always mapped into memory and an
-          ; initialization-only part that is F000-F7FF.
+          ; initialization-only part that is F000-F7FF by default, or at
+          ; the address given by INIT.
           ;
           ; This initialization part is used for things that only need
           ; to happen at a hard reset and never again, so that ROM space
           ; can be paged out and replaced with RAM when booting.
 
-            org   0f000h
+            org   INIT
 
             lbr   sysinit
             lbr   rominit
@@ -284,6 +222,7 @@ romboot:    sep   scall
             sep   scall
             dw    roprobe
 
+#ifdef IDE_SELECT
             ldi   0
             sep   scall
             dw    cfprobe
@@ -291,14 +230,22 @@ romboot:    sep   scall
             ldi   1
             sep   scall
             dw    cfprobe
+#endif
 
             ldi   0
             sep   scall
             dw    sdprobe
 
+#ifdef SD_SECOND
             ldi   1
             sep   scall
             dw    sdprobe
+#endif
+
+#ifdef SD_ASK
+            sep   scall                 ; ask whether to probe second sd
+            dw    sdask
+#endif
 
             sep   scall
             dw    endprob
@@ -314,6 +261,7 @@ dskboot:    sep   scall
             ldi   diskmap.0
             plo   ra
 
+#ifdef IDE_SELECT
             ldi   0
             sep   scall
             dw    cfprobe
@@ -321,19 +269,67 @@ dskboot:    sep   scall
             ldi   1
             sep   scall
             dw    cfprobe
+#endif
 
             ldi   0
             sep   scall
             dw    sdprobe
 
+#ifdef SD_SECOND
             ldi   1
             sep   scall
             dw    sdprobe
+#endif
+
+#ifdef SD_ASK
+            sep   scall                 ; ask whether to probe second sd
+            dw    sdask
+#endif
 
             sep   scall
             dw    endprob
 
+#ifdef SD_DEBUG
+            sep   scall                 ; read tests, see sddebug
+            dw    sddebug
+#endif
+
+#ifdef MONITOR
+          ; Rather than booting, enter the monitor. Enabling the expansion
+          ; memory can page out the ROM this is running from, so copy a
+          ; stub that does that and then jumps to the monitor into RAM in
+          ; the boot sector page, and run it from there.
+
+            sep   scall
+            dw    copymem
+            dw    monstub
+            dw    sector
+            dw    monlast-monstub
+
+            lbr   sector
+
+monstub:    sex   r3
+
+          #ifdef EXP_MEMORY
+          #if RTC_GROUP
+            out   EXP_PORT              ; select rtc group if not zero
+            db    RTC_GROUP
+          #endif
+            out   RTC_PORT              ; enable banked ram
+            db    81h
+          #if RTC_GROUP
+            out   EXP_PORT              ; make sure default expander group
+            db    NO_GROUP
+          #endif
+          #endif
+
+            sex   r2
+            lbr   MONITOR
+
+monlast:  ; End of block copied to low memory.
+#else
             lbr   runtime
+#endif
 
 
 fillmap:    ldi   0
@@ -349,6 +345,74 @@ endprob:    glo   ra
             db    13,10,0
 
             sep   sret
+
+#ifdef SD_ASK
+          ; Ask whether to probe for an SD card in the second slot, since the
+          ; second SPI port might have something else connected, like a
+          ; display. Any key pressed within about two seconds means yes, in
+          ; which case this jumps to the probe. With the bit-banged console
+          ; only the start bit is looked for since the character may not be
+          ; able to be received correctly here.
+
+sdask:      sep   scall
+            dw    inmsg
+            db    'Probe SD slot 2? Press a key...',0
+
+            ldi   (FREQ_KHZ*14).1       ; about two seconds of polling
+            phi   rc
+            ldi   (FREQ_KHZ*14).0
+            plo   rc
+
+askloop:    ghi   re                    ; bit-banged if baud rate not zero
+            shr
+            lbnz  askbang
+
+          #if UART_GROUP
+            sex   r3                    ; select uart group
+            out   EXP_PORT
+            db    UART_GROUP
+          #endif
+
+            sex   r2                    ; check uart for received character
+            inp   UART_STATUS
+
+          #if UART_GROUP
+            sex   r3                    ; back to default group
+            out   EXP_PORT
+            db    NO_GROUP
+            sex   r2
+          #endif
+
+            shr                         ; if data available then yes
+            lbdf  askuart
+            lbr   asknext
+
+askbang:    BRMK  asknext               ; if start bit then yes
+            lbr   askyes
+
+asknext:    dec   rc                    ; loop until time runs out
+            glo   rc
+            lbnz  askloop
+            ghi   rc
+            lbnz  askloop
+
+            sep   scall                 ; timed out, no second probe
+            dw    inmsg
+            db    ' no',13,10,0
+
+            sep   sret
+
+askuart:    sep   scall                 ; discard the character
+            dw    read
+
+askyes:     sep   scall
+            dw    inmsg
+            db    ' yes',13,10,0
+
+            ldi   1                     ; probe second slot and return
+            lbr   sdprobe
+#endif
+
 
 copymem:    lda   r6
             phi   rd
@@ -442,7 +506,7 @@ roprobe:    ldi   lastram.1             ; pointer to last ram variable
             dw    inmsg
             db    ' KB ROM (Uncompressed)',13,10,0
 
-            sep   sret                  ; return 
+            sep   sret                  ; return
 
 
             ; Discover devices present in the system to store into a memory
@@ -497,7 +561,7 @@ chkdevs:    ldi   devbits.1             ; pointer to memory variables
             inp   UART_STATUS           ; check for psi and da bits low
             ani   %11100001
             xri   %11000000
-            bnz   findrtc
+            lbnz  findrtc
 
             ldn   ra                    ; looks like uart is present
             ori   DEV_UART
@@ -521,7 +585,7 @@ findrtc:    sex   r3                    ; select rtc month msd register
             sex   r2                    ; look for xxxx000x data
             inp   RTC_PORT
             ani   0eh
-            bnz   savefrq
+            lbnz  savefrq
 
 
             ; If we have an RTC, we can use it to measure the processor
@@ -629,7 +693,7 @@ hzratio:    ghi   rb                    ; get value for multiple
 
             ldi   5.1                   ; divide by 5
             phi   rd
-            ldi   5.0 
+            ldi   5.0
             plo   rd
 
             sep   scall                 ; use bios divide
@@ -665,17 +729,39 @@ savefrq:    inc   ra                    ; move on from device map
             sep   scall
             dw    setbd
 
+          ; Set up the page zero console vectors with a LBR to the routines
+          ; for the console that was selected, so that software can find
+          ; the real console routines and can install hooks on them.
+
+            sep   scall                 ; bit-banged console vectors
+            dw    copymem
+            dw    bangvec
+            dw    contype
+            dw    6
+
+            ghi   re                    ; zero baud rate means uart
+            shr
+            lbnz  convdone
+
+            sep   scall                 ; uart console vectors instead
+            dw    copymem
+            dw    uartvec
+            dw    contype
+            dw    6
+
+convdone:
  sep   scall
  dw    f_inmsg
  db    13,10,10
  db    "Mini/ROM for 1802/Mini Reset..."
  db    13,10,10,0
 
-          ; Calculate the checksum of the ROM from $8000-FFFF
+          ; Calculate the checksum of the resident BIOS from $F800-FFFF, so
+          ; that other contents of the ROM do not affect it.
 
-            ldi   8000h.1               ; pointer to start of rom
+            ldi   RESIDENT.1            ; pointer to start of bios
             phi   ra
-            ldi   8000h.0
+            ldi   RESIDENT.0
             plo   ra
 
             ldi   0                     ; clear sum accumulator
@@ -696,6 +782,9 @@ nocarry:    add
             phi   rc
 
             ghi   ra                    ; loop until address rolls over
+          #if RESIDENT != 0f800h
+            xri   (RESIDENT.1+8)&0ffh   ;  or to end of relocated bios
+          #endif
             bnz   cheksum
 
 
@@ -747,7 +836,7 @@ nocarry:    add
             dw    f_inmsg
             db    ' OK)',13,10,0
 
-            br    chekcpu               ; check the processor type
+            lbr   chekcpu               ; check the processor type
 
 chekbad:    sep   scall                 ; if mismatch, display checksum
             dw    f_msg
@@ -788,9 +877,9 @@ getfreq:    ldi   clkfreq.1
             plo   ra
 
             lda   ra
-            bnz   hasfreq
+            lbnz  hasfreq
             ldn   ra
-            bnz   hasfreq
+            lbnz  hasfreq
 
             sep   scall
             dw    inmsg
@@ -802,7 +891,7 @@ getfreq:    ldi   clkfreq.1
             ldi   4000.1
             str   ra
 
-            br    uartout
+            lbr   uartout
 
 hasfreq:    ldn   ra
             adi   10000.0
@@ -854,7 +943,7 @@ uartout:    ldi   devbits.1
 
             ldn   ra
             ani   DEV_UART
-            bz    notuart
+            lbz   notuart
 
             sep   scall
             dw    inmsg
@@ -874,9 +963,9 @@ notrtc:     sep   scall
 
             ; Initialize the jump vectors for the BIOS API calls that have
             ; been moved to loadable modules. Install for each one a LBR
-            ; instruction to O_WRMBOOT which the module will overwrite the
-            ; address when its loaded. This will at least fail gracefully
-            ; if they are called when the module is not loaded.
+            ; instruction to the same error return as other unimplemented
+            ; calls, which the module will overwrite the address of when
+            ; it is loaded.
 
             sep   scall
             dw    copymem
@@ -886,9 +975,10 @@ notrtc:     sep   scall
 
             sep   sret
 
-vecinit:    lbr   o_wrmboot
-            lbr   o_wrmboot
+vecinit:    lbr   error
+            lbr   error
 veclast:
+
 
             ; It's not safe to run the expansion memory enable and memory
             ; scan code from ROM for two reasons: we are running from part
@@ -959,6 +1049,8 @@ testram:    sep   scall
             sep   sret
 
 
+#ifdef IDE_SELECT
+
           ; Check to see if a drive is present. We will do this thoroughly
           ; and remember the result so that the actual driver can take some
           ; shortcuts. This is fine since drive hot-swap is not supported.
@@ -966,6 +1058,7 @@ testram:    sep   scall
 cfprobe:    plo   r8
             bz    pridisk
 
+          #ifdef IDE_SECOND
             sex   r3
             out   EXP_PORT              ; set group for second disk
             db    IDE_SECOND
@@ -974,7 +1067,10 @@ cfprobe:    plo   r8
             inp   EXP_PORT
             xri   IDE_SECOND
             ani   0fh
-            bnz   nodrive
+            lbnz  nodrive
+          #else
+            sep   sret                  ; no second interface
+          #endif
 
 
           ; We can quickly detect if there is no drive by outputing a zero
@@ -990,7 +1086,7 @@ cfprobe:    plo   r8
           ; To detect whether there is a controller present, command a DMA
           ; IN operation from the device control register. If there is no
           ; controller, then no DMA will happen.
- 
+
 pridisk:    ldi   sector.1              ; set dma target address
             phi   r0
             ldi   sector.0
@@ -1007,7 +1103,7 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             ghi   r0                    ; if no change, no controller
             smi   sector.1
-            bz    nodrive
+            lbz   nodrive
 
           ; To detect whether there is no disk, write zero to the drive
           ; control register. Capacitance will cause the zero to read back
@@ -1020,14 +1116,14 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             sex   r2                    ; if reads back zero, no drive
             inp   IDE_DATA
-            bz    nodrive
+            lbz   nodrive
 
           ; Now that we know there is a drive, make sure busy is not set,
           ; then select drive zero which is the only one supported.
 
             sep   scall                 ; wait until controller not busy
             dw    waitbs2
-            bdf   nodrive
+            lbdf  nodrive
 
             sex   r3                    ; select lba mode and drive
             out   IDE_SELECT
@@ -1037,10 +1133,10 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             sep   scall                 ; wait until drive ready
             dw    waitrd2
-            bdf   nodrive
+            lbdf  nodrive
 
             ani   IDE_S_DRQ+IDE_S_IDX   ; these should not be set
-            bnz   nodrive
+            lbnz  nodrive
 
 
           ; Now that we think there is a working drive here, set it to
@@ -1060,10 +1156,10 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             sep   scall                 ; wait until drive ready
             dw    waitrd2
-            bdf   nodrive
+            lbdf  nodrive
 
             ani   IDE_S_DRQ+IDE_S_ERR   ; these should not be set
-            bnz   nodrive
+            lbnz  nodrive
 
 
           ; Send an identify command as a further test that the drive works,
@@ -1078,11 +1174,11 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             sep   scall                 ; wait until drive ready
             dw    waitrd2
-            bdf   nodrive
+            lbdf  nodrive
 
             ani   IDE_S_DRQ+IDE_S_ERR   ; should have drq but not err
             xri   IDE_S_DRQ
-            bnz   nodrive
+            lbnz  nodrive
 
             ldi   sector.1              ; setup dma buffer pointer
             phi   r0
@@ -1097,7 +1193,7 @@ pridisk:    ldi   sector.1              ; set dma target address
 
             sep   scall                 ; wait for busy clear and rdy set
             dw    waitrd2
-            bdf   nodrive
+            lbdf  nodrive
 
             ani   IDE_S_DRQ+IDE_S_ERR   ; if set then something is wrong
             bnz   nodrive
@@ -1120,9 +1216,11 @@ pridisk:    ldi   sector.1              ; set dma target address
             lda   rb                    ; msb should always be zero
             bnz   nodrive
 
+          #ifdef IDE_SECOND
             sex   r3
             out   EXP_PORT              ; reset back to default group
             db    NO_GROUP
+          #endif
 
             sep   scall                 ; display drive info
             dw    driveid
@@ -1136,9 +1234,12 @@ pridisk:    ldi   sector.1              ; set dma target address
           ; Advance our counter and pointer and go back and check for the
           ; next drive if not at the end of controller list.
 
-nodrive:    sex   r3
+nodrive:
+          #ifdef IDE_SECOND
+            sex   r3
             out   EXP_PORT              ; reset back to default group
             db    NO_GROUP
+          #endif
 
             sep   sret
 
@@ -1313,11 +1414,14 @@ loopbs2:    sex   r2
 exitbs2:    ldx
             sep   sret
 
+#endif
+
 
 
 
 sdprobe:    plo   r8
 
+          #if SPI_GROUP
             sex   r3
             out   EXP_PORT              ; set group for second disk
             db    SPI_GROUP
@@ -1327,6 +1431,7 @@ sdprobe:    plo   r8
             xri   SPI_GROUP
             ani   0fh
             lbnz  sdclear
+          #endif
 
 
             ldi   sector.1              ; set dma target address
@@ -1455,7 +1560,7 @@ csdsdhc:    lda   rf
 
             sep   scall
             dw    inmsg
-            db    ' GB SDHC (',0
+            db    ' MB SDHC (',0
 
             lbr   sdmodel
 
@@ -1544,26 +1649,37 @@ sdmodel:    ldi   scratch.0
             ldi   17+scratch.0
             plo   rb
 
-            lda   rb
-            str   rf
-            inc   rf
+          ; Copy the two-character OEM ID and five-character product name,
+          ; skipping any characters that are not printable, as some cards
+          ; have binary values here. Separate the two with a space if any
+          ; OEM ID characters were copied.
 
-            lda   rb
-            str   rf
-            inc   rf
+            ldi   7                     ; oem id plus product name
+            plo   re
+
+pnmloop:    glo   re                    ; after the oem id, add a space
+            xri   5                     ;  if any characters were copied
+            lbnz  pnmchar
+            glo   rf
+            xri   scratch.0
+            lbz   pnmchar
 
             ldi   ' '
             str   rf
             inc   rf
 
-            ldi   5
-            plo   re
+pnmchar:    lda   rb                    ; skip if less than a space
+            smi   ' '
+            lbnf  pnmnext
 
-pnmloop:    lda   rb
+            smi   7fh-' '               ; skip if delete or above
+            lbdf  pnmnext
+
+            adi   7fh                   ; restore character and copy
             str   rf
             inc   rf
 
-            dec   re
+pnmnext:    dec   re
             glo   re
             lbnz  pnmloop
 
@@ -1645,6 +1761,105 @@ sdident:    plo   re
             adi   sdinctl.0
             plo   ra
 
+#ifdef SD_DEBUG
+          ; Debugging version of the card identification, which calls the
+          ; real initialization routines and records the results in a log
+          ; at 0300h+unit*20h:
+          ;
+          ;   +0  sdsetup busy check (01 = timed out, continued anyway)
+          ;   +1  spiinit result (00 = ok, 01 = failed)
+          ;   +2  +3 r0 after spiinit: if cmd0 succeeded, +2 is 00 unless
+          ;       cmd8 failed (response^1) or cmd58 failed (response), and
+          ;       +3 is 00 unless cmd55 or acmd41 failed (response>>1)
+          ;   +4  first ocr byte saved by spiinit
+          ;   +5  cmd9 response, +6 token, +7 cmd10 response, +8 token
+          ;
+          ; Unused bytes are left as EE.
+
+            glo   re                    ; log address for this unit
+            shl
+            shl
+            shl
+            shl
+            shl
+            plo   rb
+            ldi   03h
+            phi   rb
+
+dbgclr:     ldi   0eeh                  ; clear log to ee
+            str   rb
+            inc   rb
+            glo   rb
+            ani   1fh
+            lbnz  dbgclr
+
+            glo   rb                    ; back to start of log
+            smi   20h
+            plo   rb
+
+            ldi   ocrreg.1              ; clear saved ocr
+            phi   re
+            ldi   ocrreg.0
+            plo   re
+            ldi   0eeh
+            str   re
+
+            sep   scall                 ; save and intialize registers
+            dw    sdsetup-2
+
+            ldi   0                     ; log busy result but continue
+            shlc
+            str   rb
+            inc   rb
+
+            sep   scall                 ; initialize sd card to spi mode
+            dw    spiinit-2
+
+            ldi   0                     ; log result
+            shlc
+            plo   rc
+            str   rb
+            inc   rb
+
+            ghi   r0                    ; log cmd0 retries remaining
+            str   rb
+            inc   rb
+            glo   r0
+            str   rb
+            inc   rb
+
+            ldi   ocrreg.1              ; log saved ocr byte
+            phi   re
+            ldi   ocrreg.0
+            plo   re
+            ldn   re
+            str   rb
+            inc   rb
+
+            glo   rc                    ; stop if initialization failed
+            lbnz  dbgfail
+
+            sep   r9                    ; send csd command
+            db    SD_CMD9
+            str   rb
+            inc   rb
+            lbnz  sderror
+
+            sep   r9                    ; receive data block start token
+            db    recvspi.0
+            str   rb
+            inc   rb
+
+            xri   0feh                  ; other than 11111110 is an error,
+            lbnz  sderror               ;  including a timeout
+
+            lbr   dbgcsd
+
+dbgfail:    smi   0                     ; failed, return with df set
+            lbr   sdfinal
+
+dbgcsd:
+#else
             sep   scall                 ; save and intialize registers
             dw    sdsetup-2
             lbdf  sdfinal
@@ -1658,27 +1873,36 @@ sdident:    plo   re
             lbnz  sderror
 
             sep   r9                    ; receive data block start token
-            db    recvspi
+            db    recvspi.0
 
             xri   0feh                  ; other than 11111110 is an error,
             lbnz  sderror               ;  including a timeout
+#endif
 
             sep   r9                    ; get 16 data bytes plus crc
-            db    recvbuf
+            db    recvbuf.0
             db    1,SPI_COUNT+16
 
             sep   r9                    ; send cid command
             db    SD_CMD10
+#ifdef SD_DEBUG
+            str   rb
+            inc   rb
+#endif
             lbnz  sderror
 
             sep   r9                    ; receive data block start token
-            db    recvspi
+            db    recvspi.0
+#ifdef SD_DEBUG
+            str   rb
+            inc   rb
+#endif
 
             xri   0feh                  ; other than 11111110 is an error,
             lbnz  sderror               ;  including a timeout
 
             sep   r9                    ; get 16 data bytes plus crc
-            db    recvbuf
+            db    recvbuf.0
             db    1,SPI_COUNT+16
 
             adi   0
@@ -1726,7 +1950,7 @@ sect2au:    shr                         ; shift three times until stop bit
 
             ldn   r9                    ; if already loaded dont decompress
             sm
-            bz    copysec
+            lbz   copysec
 
             ldn   r2                    ; update loaded au to requested
             str   r9
@@ -1742,7 +1966,7 @@ sect2au:    shr                         ; shift three times until stop bit
 
             lda   r9                    ; if not over max then proceed
             sm
-            bdf   roentry
+            lbdf  roentry
 
             ghi   rf                    ; else fix pointer, return success
             adi   2
@@ -1806,7 +2030,7 @@ roentry:    glo   r9
             plo   r9
             ldi   7000h.1
             phi   r9
-            
+
 
             sep   scall
             dw    decompr
@@ -1863,7 +2087,7 @@ secloop:    lda   r9                     ; copy two bytes per loop
 
             dec   re                     ; loop until done
             glo   re
-            bnz   secloop
+            lbnz  secloop
 
 
           ; The sector has been copied, so restore registers and return.
@@ -1871,7 +2095,7 @@ secloop:    lda   r9                     ; copy two bytes per loop
             lbr   diskret
 
 
-            org   0f700h
+            org   INIT+0700h
 
           ; The decompression algorithm is that from Einar Saukas's standard
           ; Z80 ZX0 decompressor, but is completely rewriten due to how very
@@ -1921,7 +2145,7 @@ copylit:    lda   rd                    ; copy byte from source data
             ghi   rc
             bnz   copylit
 
-          ; A literal is always followed by a copy block. The next input bit 
+          ; A literal is always followed by a copy block. The next input bit
           ; indicates if is from a new offset or the same offset as last.
 
             glo   re                    ; get next bit from input stream
@@ -2010,7 +2234,7 @@ endfile:    sep   sret
           ; reads from the input pointed to by RF as needed, returning the
           ; resulting decoded number in RC.
           ;
-          ; Note that this is short-subroutine called by jumping to the 
+          ; Note that this is short-subroutine called by jumping to the
           ; subroutine with a BR instruction and passing the return address
           ; in D. This only works within the same page of code but is fast.
 
@@ -2106,7 +2330,7 @@ scnloop:    glo   rf                    ; randomize address within page
 
             glo   re                    ; restore original value
             str   rf
-  
+
 scnwait:    glo   re                    ; wait until value just written
             xor                         ;  reads back again
             bnz   scnwait
@@ -2169,11 +2393,19 @@ setbd:      ; a generic 1854 implementation.
             sep   sret
 
 
-          #ifdef SET_BAUD
-            ldi   (FREQ_KHZ*5)/(SET_BAUD/25)-23
-          #endif
+#ifdef FAST_UART
 
+          ; The fast bit-banged routines run at a fixed speed so there is no
+          ; baud rate to measure. Just set the output to the idle state and
+          ; set RE.1 to a non-zero rate (selecting bit-bang) with echo on.
 
+btimalc:    SEMK                      ; Make output in correct state
+
+            ldi   2+1                 ; bit-bang with echo flag set
+            phi   re
+            sep   sret
+
+#else
           ; If we are going to consider using the bit-banged port, then start
           ; out by first setting the output to the correct idle state.
 
@@ -2249,7 +2481,7 @@ timcnt2:    adi   1
           ; from 0-63, but resolution to 3 counts for 64 and above. This is
           ; fine since more inaccuracy is tolerable at slower baud rates.
 
-timdone:    ldi   63                  ; Pre-load this value that we will 
+timdone:    ldi   63                  ; Pre-load this value that we will
             plo   re                  ;  need in the calculations later
 
             ghi   re                  ; Get timing loop value, subtract
@@ -2267,7 +2499,7 @@ timdone:    ldi   63                  ; Pre-load this value that we will
 timdiv3:    smi   3                   ; Otherwise, divide the excess part
             inc   re                  ;  by three, adding to the 63 we saved
             bdf   timdiv3             ;  earlier so results are 64-126
-        
+
             glo   re                  ; Get result of division plus 63
             phi   re                  ;  and save over raw measurement
 
@@ -2279,6 +2511,8 @@ timkeep:    ghi   re                  ; Get final result and shift left one
             sep   sret                ;  return to caller
 
 
+#endif
+
 timuart:    inp   UART_DATA           ; discard port detection character
 
             ldi   1                   ; set echo and baud=0 meaning uart
@@ -2288,12 +2522,171 @@ timuart:    inp   UART_DATA           ; discard port detection character
 
 
 
+          ; Console vectors copied to page zero by chkdevs. These are placed
+          ; here only because there is space in this page.
+
+bangvec:    lbr   btype                 ; console vectors for bit-bang
+            lbr   bread
+
+uartvec:    lbr   utype                 ; console vectors for uart
+            lbr   uread
+
+
+          #if $ > INIT+0800h
+            #error Initialization part overflow
+          #endif
+
+
+#ifdef SD_DEBUG
+          ; Debugging read tests, called at the end of disk probing. This is
+          ; placed after the initialization part, so is only for RAM builds.
+
+            org   INIT+0800h
+
+sddebug:
+          ; Raw capture of a read of sector 0 of unit 0: at 0350h, the busy
+          ; result, the byte taken as the cmd17 response, then the next 24
+          ; bytes as received. The rest of the block is then clocked out.
+
+            ldi   sdrdctl.1             ; control values for unit 0 reads
+            phi   ra
+            ldi   sdrdctl.0
+            plo   ra
+
+            ldi   0                     ; sector 0
+            plo   r8
+            phi   r7
+            plo   r7
+
+            ldi   03h                   ; log pointer
+            phi   rb
+            ldi   50h
+            plo   rb
+
+            sep   scall                 ; wake card and select it
+            dw    sdsetup-2
+
+            ldi   0                     ; log busy result
+            shlc
+            str   rb
+            inc   rb
+
+            sep   r9                    ; send read command, log response
+            db    SD_CMD17
+            str   rb
+            inc   rb
+
+            ldi   24                    ; log the next 24 bytes as received
+            plo   rc
+dbgraw:     sep   r9
+            db    recvskp.0,1
+            sex   rb
+            inp   SPI_DATA
+            inc   rb
+            dec   rc
+            glo   rc
+            lbnz  dbgraw
+
+            sep   r9                    ; clock out rest of block and crc
+            db    recvskp.0,200
+            sep   r9
+            db    recvskp.0,200
+            sep   r9
+            db    recvskp.0,200
+
+            sex   r3                    ; deselect card
+            out   SPI_CTRL
+            db    SPI_NONE
+            sex   r2
+
+          ; Test reads of sector 0 of disk 0 through the BIOS, the same way
+          ; booting does, into 0400h and then 0600h. The DF result of each
+          ; (00 = ok, 01 = failed) is logged at 0340h and 0341h, and the
+          ; cmd17 response and data token of each at 0342h and 0344h (on
+          ; success these are overwritten by the dma end address).
+
+            ldi   0e0h                  ; disk 0, sector 0
+            phi   r8
+            ldi   0
+            plo   r8
+            phi   r7
+            plo   r7
+
+            ldi   04h                   ; first read to 0400h
+            phi   rf
+            ldi   0
+            plo   rf
+
+            ldi   0eeh                  ; preset cmd17 response and token
+            phi   r0
+            plo   r0
+
+            sep   scall
+            dw    ideread
+
+            ldi   0                     ; save result
+            shlc
+            plo   rc
+
+            ldi   03h                   ; log cmd17 response and token
+            phi   rb
+            ldi   42h
+            plo   rb
+            ghi   r0
+            str   rb
+            inc   rb
+            glo   r0
+            str   rb
+
+            ldi   0                     ; second read to 0600h
+            plo   r7
+            ldi   06h
+            phi   rf
+            ldi   0
+            plo   rf
+
+            ldi   0eeh                  ; preset cmd17 response and token
+            phi   r0
+            plo   r0
+
+            sep   scall
+            dw    ideread
+
+            ldi   0                     ; save result
+            shlc
+            phi   rc
+
+            ldi   03h                   ; log cmd17 response and token
+            phi   rb
+            ldi   44h
+            plo   rb
+            ghi   r0
+            str   rb
+            inc   rb
+            glo   r0
+            str   rb
+
+            ldi   03h                   ; log both results
+            phi   rb
+            ldi   40h
+            plo   rb
+            glo   rc
+            str   rb
+            inc   rb
+            ghi   rc
+            str   rb
+
+            sep   sret
+
+#endif
+
+
             ; The vector table at 0F800h was introduced with the Elf2K and
             ; provides some extended functionality for hardware of that
             ; platform. Where sensible, the same functions are provided here
             ; in a compatible way to support like 1802/Mini hardware.
 
-            org   0f800h
+            org   RESIDENT
 
 
             ; These theoretically provide a way to access the bit-banged UART
@@ -2343,7 +2736,7 @@ f_nvrcchk:  lbr   error
 
             ; Converts an ASCII decimal number string to 16-bit binary. The
             ; original version in the Mike Riley BIOS has some code to deal
-            ; with negative numbers but it doesn't work right, so this 
+            ; with negative numbers but it doesn't work right, so this
             ; implementation does not support negative numbers at all.
             ;
             ;   IN:   RF - pointer to string
@@ -2453,7 +2846,7 @@ hexend:     dec   rf                     ; back to non-hex and return
             sep   sret
 
 hexten:     adi   10                     ; make 'a'-'f' values 10-15
- 
+
 hexone:     str   r2                     ; save value of this digit
 
             glo   re                     ; move prior lsb into new msb
@@ -2492,7 +2885,7 @@ hexout4:    ldi   hexout2.0
 hexout2:    ldi   hexoutr.0
             stxd
             glo   rd
- 
+
 hexout:     str   r2
             shr
             shr
@@ -2527,7 +2920,7 @@ hexoutr:    sep   sret
             ; Test if D contains a symbol terminating character, that is,
             ; a character that is not alphanumeric. This simply calls isalnum
             ; and inverts the result. The character is returned unchanged.
- 
+
 isterm:     sep   scall
             dw    isalnum
 
@@ -2541,7 +2934,7 @@ isterm:     sep   scall
             ; Test if D contains an alphanumeric character, that is, 0-9,
             ; A-Z, or a-z. If so, return DF set, otherwise DF is cleared.
             ; The passed character is returned unchanged either way.
- 
+
 isalnum:    smi   '0'                   ; if less than 0, no
             bnf   alnumret
 
@@ -2558,7 +2951,7 @@ alnumret:   glo   re                    ; restore and return
             ; Test if D contains an alpha character, that is, A-F or a-f.
             ; If so, return DF set, otherwise DF is cleared. The passed
             ; character is returned unchanged either way.
- 
+
 isalpha:    smi   'A'                   ; if less than A, no
             bnf   alpharet
 
@@ -2573,7 +2966,7 @@ alphatst:   sdi   'Z'-'A'               ; if Z or less, yes
 alpharet:   glo   re                    ; restore and return
             sep   sret
 
-           
+
             ; Trim leading whitespace (space or any control characters)
             ; from zero-terminated string pointed to by RF. Updates RF to
             ; first non- whitespace character, or terminating null.
@@ -2588,12 +2981,12 @@ trimret:    dec   rf
             sep   sret
 
 
-          #if $ > 0f900h
+          #if $ > RESIDENT+0100h
             #error Page F800 overflow
           #endif
 
 
-            org   0f900h
+            org   RESIDENT+0100h
 
             ; Converts a 16-bit number to an ASCII decimal string. This will
             ; output negative or positive numbers when called at intout, or
@@ -2608,7 +3001,7 @@ intout:     ghi   rd                    ; test if number is negative
             shl
             bnf   uintout
 
-            glo   rd                    ; if so, subtract from zero to 
+            glo   rd                    ; if so, subtract from zero to
             sdi   0                     ;  convert to positive
             plo   rd
             ghi   rd
@@ -2693,7 +3086,7 @@ divisor:    equ   $-1
 
 gettod:     glo   rc                    ; save so we can use as table pointer
             stxd
-            ghi   rd
+            ghi   rc
             stxd
 
             sex   r3                    ; output inline arguments
@@ -2793,7 +3186,7 @@ settod:     glo   rc                    ; save so we can use as table pointer
 
             ghi   r3                    ; get pointer to table of data
             phi   rc
-            ldi   clkinit
+            ldi   clkinit.0
             plo   rc
 
             sex   rc                    ; port output from table
@@ -2843,8 +3236,8 @@ todtens:    inc   re                    ; divide by 10 by subtraction
             db    2fh
             out   RTC_PORT
             db    14h
-            
-todretn:    
+
+todretn:
           #if RTC_GROUP
             out   EXP_PORT              ; make sure default expander group
             db    NO_GROUP
@@ -2882,7 +3275,7 @@ clkregs:    db    29h,28h               ; month
             ; Test if D contains a hex character, that is, 0-9, A-F, or a-f.
             ; If so, return DF set, otherwise DF is cleared. The passed
             ; character is returned unchanged either way.
- 
+
 ishex:      sdi   'f'
             bnf   hexret
 
@@ -2905,7 +3298,7 @@ hexret:     glo   re
             ; Test if D contains a numeric character, that is, 0-9.
             ; If so, return DF set, otherwise DF is cleared. The passed
             ; character is returned unchanged either way.
- 
+
 isnum:      sdi   '9'
             bnf   numret
 
@@ -2914,19 +3307,27 @@ numtest:    sdi   '9'-'0'
 numret:     glo   re                    ; restore and return
             sep   sret
 
- 
 
-          #if $ > 0fa00h
+
+          #if $ > RESIDENT+0200h
             #error Page F900 overflow
           #endif
 
-            org   0fa00h
+            org   RESIDENT+0200h
+
+          ; The CF (IDE) driver is included only if the configuration
+          ; defines the IDE interface ports.
+
+#ifdef IDE_SELECT
 
 cfread:     sex   r3
+
+          #ifdef IDE_SECOND
             bz    priread
 
             out   EXP_PORT              ; select drive 1 port group
             db    IDE_SECOND
+          #endif
 
 priread:    glo   r3                    ; subroutine to setup command
             br    precmnd
@@ -2953,7 +3354,7 @@ priread:    glo   r3                    ; subroutine to setup command
             plo   re
 
             glo   r0                    ; what end address is supposed to be
-            xor 
+            xor
             bz    restret
 
             glo   re                    ; else, fix overrun byte then done
@@ -2971,9 +3372,12 @@ restret:    sex   r3                    ; select status register
             inp   IDE_DATA              ; move err flag into df to return
             shr
 
-cfreturn:   sex   r3
+cfreturn:
+          #ifdef IDE_SECOND
+            sex   r3
             out   EXP_PORT
             db    NO_GROUP
+          #endif
 
             lbr   diskret
 
@@ -2985,10 +3389,13 @@ cfreturn:   sex   r3
           ; handling is needed like it is for read.
 
 cfwrite:    sex   r3
+
+          #ifdef IDE_SECOND
             bz    priwrit
 
             out   EXP_PORT              ; select drive 1 port group
             db    IDE_SECOND
+          #endif
 
 priwrit:    glo   r3                    ; subroutine to setup command
             br    precmnd
@@ -3109,48 +3516,20 @@ loopdr3:    inp   IDE_DATA              ; wait until drive not busy
             glo   re                    ; return to ideread or idewrite
             plo   r3
 
-
-
-
-boot:       ldi   stack.1               ; setup stack for mark opcode
-            phi   r2
-            ldi   stack.0
-            plo   r2
-
-            ldi   ideboot.1             ; setup stack for mark opcode
-            phi   r6
-            ldi   ideboot.0
-            plo   r6
-
-            lbr   initcall              ; jump to initialization
-
+#endif
 
 
             ; Return the address of the last byte of RAM. This returns the
             ; RAM size that was discovered at boot rather than discovering
-            ; each time or having a built-in value. As a side effect, this
-            ; also updates the kernel variable containing the processor clock
-            ; frequency since there is no other way for that to happen
-            ; currently and this is a way to make it happen at start-up.
+            ; each time or having a built-in value.
 
 freemem:    ghi   re                    ; we only need to half-save for temp
             stxd
 
-            ldi   clkfreq.1             ; get address of bios variable
+            ldi   lastram.1             ; get address of bios variable
             phi   re
-            ldi   clkfreq.0
+            ldi   lastram.0
             plo   re
-
-            ldi   k_clkfreq.1           ; get address of kernel variable
-            phi   rf
-            ldi   k_clkfreq.0
-            plo   rf
-
-            lda   re                    ; update kernel with clock freq
-            str   rf
-            inc   rf
-            lda   re
-            str   rf
 
             br    retvar                ; return freemem in rf
 
@@ -3187,34 +3566,27 @@ retvar:     lda   re                    ; return variable value in rf
             sep   sret                  ; return to caller
 
 
-btest:      adi   0                   ; if no break, return df clear
-            BRMK  nobreak
-
-            smi   0                   ; return df set, wait for end
-break:      BRSP  break
-
-nobreak:    sep   sret                ; return result
 
 
 ; Set baud rate and character format for the 1854 UART. This does a bunch
 ; of conversions and shifts since the original BIOS call is based on the
 ; 8250 UART registers, and we want to be compatible with that.
 
-usetbd:     ani   8                     ; move bit 3 into df
-            adi   256-8
+usetbd:     ani   7                     ; mask baud rate bits,
+#ifdef HI_BAUD
+            xri   7
+            bz    baud56
+            xri   7
+#endif
+            lsz                         ;  if not zero,
+            adi   1                     ;  add one
 
-            glo   re                    ; keep as zero if zero
-            ani   7
-            bz    baud300
-
-            inc   re                    ; else add one to adjust
-            glo   re
-
-            ani   7                     ; if overflow rate too high
-            lbz   error
-
-baud300:    shlc                        ; double and add bit 3
-            ori   32
+            shl                         ; shift left,
+#ifdef HI_BAUD
+            lskp
+baud56:     ldi   0fh
+#endif
+            ori   32                    ;  set no jumper bit
 
           #if UART_GROUP
             sex   r3
@@ -3254,21 +3626,12 @@ baud300:    shlc                        ; double and add bit 3
             sep   sret
 
 
-
-          #if $ > 0fb00h
-            #error Page FA00 overflow
-          #endif
-
-
-            org   0fb00h
-
-
 ; READ54 inputs character from the 1854 UART by jumping to UREAD54 if baud
 ; rate in RE.1 is set to zero, and from the bit-banged UART otherwise.
 
 read:       ghi   re
             shr
-            bnz   bread
+            lbnz  bread
             br    uread
 
 ; Output character through the 1854 UART if baud rate in RE.1 is zero by
@@ -3276,7 +3639,7 @@ read:       ghi   re
 
 type:       ghi   re
             shr
-            bnz   btype
+            lbnz  btype
             br    utype
 
 
@@ -3362,6 +3725,40 @@ utest:      ; the 1854 UART, and DF=0 otherwise.
 
 ; End of 1854 UART send and receive code.
 
+
+boot:       ldi   stack.1               ; setup stack for mark opcode
+            phi   r2
+            ldi   stack.0
+            plo   r2
+
+            ldi   ideboot.1             ; setup stack for mark opcode
+            phi   r6
+            ldi   ideboot.0
+            plo   r6
+
+            lbr   initcall              ; jump to initialization
+
+
+          #if $ > RESIDENT+0300h
+            #error Page FA00 overflow
+          #endif
+
+
+            org   RESIDENT+0300h
+
+
+          ; The FB00 page holds the bit-banged serial routines. With FAST_UART
+          ; these are fixed-speed unrolled routines that take the whole page.
+
+#ifdef FAST_UART
+  #if FREQ_KHZ == 4000
+    #include    fast_uart4000.asm
+  #elif FREQ_KHZ == 1790 || FREQ_KHZ == 3686
+    #include    fast_uart1790.asm
+  #else
+    #error      Fast UART not supported at this speed.
+  #endif
+#else
 
             ; The recvwait call receives a character through the serial port
             ; waiting indefinitely. This is the core of the normal read call
@@ -3529,64 +3926,14 @@ btymark:    SEMK
             ldn   r2
             sep   sret
 
+#endif
 
-idewrite:   ldi   writvec
-            lskp
-
-ideread:    ldi   readvec
-            plo   re
-
-            glo   r9
-            stxd
-            ghi   r9
-            stxd
-
-            ghi   r8
-            ani   31
-
-            smi   8
-            bdf   diskret
-
-            adi   (diskmap+8).0
-            plo   r9
-            ldi   (diskmap+8).1
-            phi   r9
-
-            glo   re
-            plo   r3
-
-readvec:    ldn   r9
-            smi   4
-            lbdf  sdread
-
-            adi   2
-            lbdf  cfread
-
-            adi   1
-            lbdf  roread
-
-            br    idenone
-
-writvec:    ldn   r9
-            smi   4
-            lbdf  sdwrite
-
-            adi   2
-            lbdf  cfwrite
-
-idenone:    smi   0
-
-diskret:    inc   r2
-            lda   r2
-            phi   r9
-            ldn   r2
-            plo   r9
-
-            sep   sret
+          #if $ > RESIDENT+0400h
+            #error Page FB00 overflow
+          #endif
 
 
-
-            org     0fc00h
+            org     RESIDENT+0400h
 
 initcall:   ldi     call.1             ; address of scall
             phi     r4
@@ -3655,7 +4002,7 @@ mulskip:    glo   rd                    ; right shift product, while also
             ; Divide two 16-bit numbers to get a 16-bit result plus a 16-bit
             ; remainder. The input numbers are in RF and RD and the result
             ; RF/RD is returned in RB with the remainder in RF.
- 
+
 div16:      ghi   re                    ; temporary place for subtraction lsb
             stxd
 
@@ -3805,7 +4152,7 @@ endin:      shr
 
             ldx
             phi   re
-            
+
             sep   sret
 
 print:      glo   rc
@@ -3887,7 +4234,7 @@ anyboot:    ldi   sector.1              ; load boot sector to $0100
 
 
 
-            org   0fd00h
+            org   RESIDENT+0500h
 
 
 
@@ -3904,13 +4251,13 @@ anyboot:    ldi   sector.1              ; load boot sector to $0100
           ; standard SCRT conventions like all of Elf/OS uses. There are also
           ; two other methods used which have much less overhead than SCRT.
           ;
-          ; For calling subroutines in the same page, we use a calling 
+          ; For calling subroutines in the same page, we use a calling
           ; convention of GLO R3,BR SUBR; the GLO R3 is to pass the return
           ; address to the subroutine, which it increments by 2 to get the
           ; return address past the BR instruction, and saves it somewhere.
           ; To return, the address is simply stuffed into the PC with PLO R3.
 
-          ; For calling subroutines in the other page, we use SEP R9 to 
+          ; For calling subroutines in the other page, we use SEP R9 to
           ; switch PC to one in the other page. In this case, we follow the
           ; SEP R9 with the address of the subroutine within the other page.
           ; R9 is initialized to point to a LDA R3,PLO R9 sequence which
@@ -3956,6 +4303,9 @@ sdread:     plo   re
 
             sep   r9                    ; read the block from disk
             db    SD_CMD17
+#ifdef SD_DEBUG
+            phi   r0                    ; record cmd17 response
+#endif
             bz    rdblock
             bnf   sderror
 
@@ -3965,15 +4315,21 @@ reinit:     glo   r3                    ; if timeout, initialize sd card
 
             sep   r9                    ; resend block read command
             db    SD_CMD17
+#ifdef SD_DEBUG
+            phi   r0                    ; record cmd17 response
+#endif
             bnz   sderror
 
 rdblock:    sep   r9                    ; if block start not fe then error
-            db    recvspi
+            db    recvspi.0
+#ifdef SD_DEBUG
+            plo   r0                    ; record data start token
+#endif
             xri   0feh
             bnz   sderror
 
             sep   r9                    ; get 512 data bytes to buffer
-            db    recvbuf
+            db    recvbuf.0
             db    512/SPI_BURST
             db    SPI_COUNT+SPI_BURST
 
@@ -3981,7 +4337,7 @@ rdblock:    sep   r9                    ; if block start not fe then error
             br    sdfinal
 
 
-          ; SDWRITE writes a block to the SD Card; the block address is passed 
+          ; SDWRITE writes a block to the SD Card; the block address is passed
           ; in R8:R7 and the pointer to the data buffer is in RF. If the write
           ; is successful, DF is cleared, otherwise it is set. Unlike in
           ; SDREAD, we do not intialize the card if the write command times
@@ -3991,7 +4347,7 @@ rdblock:    sep   r9                    ; if block start not fe then error
           ; card is almost certainly wrong and will corrput data, probably it
           ; happened as a result of a card that was swapped while a file was
           ; open. So, it seems safer to let these fail.
- 
+
 sdwrite:    plo   re
 
             ghi   re                    ; save to use for scratch and counter
@@ -4021,7 +4377,7 @@ sdwrite:    plo   re
             bnz   sderror
 
             sep   r9                    ; send 512 bytes from buffer
-            db    sendbuf
+            db    sendbuf.0
             db    512/SPI_BURST
             db    SPI_COUNT+SPI_BURST
 
@@ -4030,7 +4386,7 @@ sdwrite:    plo   re
             bnz   sderror
 
             sep   r9                    ; wait while write completes, if
-            db    spibusy               ;  not within timeout, then error
+            db    spibusy.0               ;  not within timeout, then error
             bdf   sderror
 
             sep   r9                    ; send get device status command
@@ -4054,7 +4410,7 @@ sdwrite:    plo   re
           ; return address since we are pushing to the stack here. This
           ; calls SPIWAKE which actually performs the return from here also.
 
-            ldi   sdsret-2
+            ldi   sdsret.0-2
 
 sdsetup:    adi   2                     ; save return address following br
             plo   re
@@ -4065,7 +4421,7 @@ sdsetup:    adi   2                     ; save return address following br
             plo   r9
 
             sep   r9                    ; send initial spi clock pulses
-            db    spiwake
+            db    spiwake.0
 
 
           ; INITSPI initializes an SD Card into SPI mode by sending the
@@ -4075,32 +4431,61 @@ sdsetup:    adi   2                     ; save return address following br
           ; by byte or by block. So this information is saved during initial-
           ; ization for later reference in sending read and write commands.
 
-            ldi   sdsret-2
+            ldi   sdsret.0-2
 
 spiinit:    adi   2                     ; save return address following br
             str   r2
 
-            sep   r9                    ; send reset command, expect 1
+          ; A card that was left in the middle of something may take many
+          ; resets before it reports idle, so retry up to 1024 times while
+          ; the card is responding. If there is no response at all, there
+          ; is probably no card, so give up after the second time. R0 is
+          ; used as the counter; it is only otherwise used for DMA.
+
+            ldi   1024.1                ; retry count for card responses
+            phi   r0
+            ldi   1024.0
+            plo   r0
+
+cmd0try:    sep   r9                    ; send reset command, expect 1
             db    SD_CMD0
             xri   1
             bz    spimode
 
-            sep   r9                    ; try reset again if not
-            db    SD_CMD0
-            xri   1
-            bnz   sdinerr
+            bnf   cmd0cnt               ; if card responded, just count
 
-spimode:    sep   r9                    ; send host voltage, expect 1
+            ghi   r0                    ; if no response, allow only two
+            smi   3
+            phi   r0
+            bnf   sdinerr
+
+cmd0cnt:    dec   r0                    ; retry until count exhausted
+            glo   r0
+            bnz   cmd0try
+            ghi   r0
+            bnz   cmd0try
+
+            br    sdinerr
+
+spimode:
+#ifdef SD_DEBUG
+            phi   r0                    ; clear failure marker (d is 0)
+#endif
+            sep   r9                    ; send host voltage, expect 1
             db    SD_CMD8
             xri   1
             bnz   get4err
 
             sep   r9                    ; receive 4 more bytes of response
-            db    recvskp,4
+            db    recvskp.0,4
 
-waitini:    sep   r9                    ; send application escape, expect 1
+          ; The card can finish initializing between an ACMD41 that returns
+          ; 1 (idle) and the next CMD55, which then returns 0 (not idle), so
+          ; accept either 0 or 1 from CMD55, the same as ACMD41.
+
+waitini:    sep   r9                    ; send application escape, expect 0 or 1
             db    SD_CMD55
-            xri   1
+            shr
             bnz   sdinerr
 
             sep   r9                    ; send host capacity, expect 0 or 1
@@ -4127,15 +4512,23 @@ waitini:    sep   r9                    ; send application escape, expect 1
             inp   SPI_DATA
 
             sep   r9                    ; skip 3 more bytes of response
-            db    recvskp,3
+            db    recvskp.0,3
 
             ldn   r2                    ; return
             plo   r3
 
-get4err:    sep   r9                    ; receive extra 4 bytes
-            db    recvskp,4
+get4err:
+#ifdef SD_DEBUG
+            phi   r0                    ; cmd8 response^1 or cmd58 response
+#endif
+            sep   r9                    ; receive extra 4 bytes
+            db    recvskp.0,4
 
-sdinerr:    smi   0
+sdinerr:
+#ifdef SD_DEBUG
+            plo   r0                    ; cmd55 or acmd41 response>>1
+#endif
+            smi   0
 
             ldn   r2                    ; return
             plo   r3
@@ -4178,11 +4571,13 @@ sdfinal:    sex   r3                    ; de-select sd card device
 
 
 
-          #if $ > 0fe00h
+
+
+          #if $ > RESIDENT+0600h
             #error Page FD00 overflow
           #endif
 
-            org   0fe00h
+            org   RESIDENT+0600h
 
 
           ; After power-on an SD Card may require up to 74 clock pulses
@@ -4468,7 +4863,7 @@ dmaloop:    out   SPI_CTRL              ; start burst by loading counter
 
             smi   1                     ; decrement count, loop until done
             bnz   dmaloop
-       
+
             inc   r3                    ; skip burst count
 
             sex   ra
@@ -4563,12 +4958,12 @@ memcpy:     glo   rc
 
 
 
-          #if $ > 0ff00h
+          #if $ > RESIDENT+0700h
             #error Page FE00 overflow
           #endif
 
 
-            org   0ff00h
+            org   RESIDENT+0700h
 
 f_boot:     lbr   boot
 f_type:     lbr   type
@@ -4623,6 +5018,80 @@ error:      smi   0
             sep   sret
 
 
+idewrite:   ldi   writvec.0
+            lskp
+
+ideread:    ldi   readvec.0
+            plo   re
+
+            glo   r9
+            stxd
+            ghi   r9
+            stxd
+
+            ghi   r8
+            ani   31
+
+            smi   8
+            bdf   diskret
+
+            adi   (diskmap+8).0
+            plo   r9
+            ldi   (diskmap+8).1
+            phi   r9
+
+            glo   re
+            plo   r3
+
+readvec:    ldn   r9
+            smi   4
+            lbdf  sdread
+
+#ifdef IDE_SELECT
+            adi   2
+            lbdf  cfread
+
+            adi   1
+#else
+            adi   3
+#endif
+            lbdf  roread
+
+            br    idenone
+
+writvec:    ldn   r9
+            smi   4
+            lbdf  sdwrite
+
+#ifdef IDE_SELECT
+            adi   2
+            lbdf  cfwrite
+#endif
+
+idenone:    smi   0
+
+diskret:    inc   r2
+            lda   r2
+            phi   r9
+            ldn   r2
+            plo   r9
+
+            sep   sret
+
+
+btest:      adi   0                   ; if no break, return df clear
+            BRMK  nobreak
+
+            smi   0                   ; return df set, wait for end
+break:      BRSP  break
+
+nobreak:    sep   sret                ; return result
+
+          #if $ > RESIDENT+07d8h
+            #error Page FF00 overflow
+          #endif
+
+
           ; The entry points call at 0FFE0h and ret at 0FFF1h are indicated in
           ; Mike Riley's bios.inc as being deprecated, but the Elf/OS boot
           ; sector at least still needs them to work properly, as it uses
@@ -4638,7 +5107,7 @@ error:      smi   0
           ; instruction set. While this is opposite of what Mike Riley's BIOS
           ; does, it should not be a problem, and none have been reported.
 
-            org   0ffd8h
+            org   RESIDENT+07d8h
 
 callbr:     glo   r3
             plo   r6
@@ -4651,7 +5120,7 @@ callbr:     glo   r3
             glo   re
             sep   r3                    ; jump to called routine
 
-          #if $ != 0ffe0h
+          #if $ != RESIDENT+07e0h
           #error call is not at 0ffe0h
           #endif
 
@@ -4677,7 +5146,7 @@ retbr:      irx                         ; restore next-prior return address
             glo   re                    ; restore d and jump to return
             sep   r3                    ;  address taken from r6
 
-          #if $ != 0fff1h
+          #if $ != RESIDENT+07f1h
           #error ret is not at 0fff1h
           #endif
 
@@ -4691,7 +5160,7 @@ ret:        plo   re                    ; save d and set x to 2
 
             br    retbr                 ; jump back to continuation
 
-          #if $ != 0fff9h
+          #if $ != RESIDENT+07f9h
           #error version is not at 0fff9h
           #endif
 
