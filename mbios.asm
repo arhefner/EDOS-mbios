@@ -58,7 +58,8 @@ findtkn:    equ   0030h                 ; jump vector for f_findtkn
 idnum:      equ   0033h                 ; jump vector for f_idnum
 contype:    equ   0036h                 ; console output vector (lbr)
 conread:    equ   0039h                 ; console input vector (lbr)
-ocrreg:     equ   004bh                 ; saved sd card ocr register byte
+ocrreg:     equ   004bh                 ; saved sd card ocr byte, one per
+                                        ;  sd unit: 004bh unit 0, 004ch unit 1
 devbits:    equ   003ch                 ; f_getdev device present result
 clkfreq:    equ   003eh                 ; processor clock frequency in khz
 lastram:    equ   0040h                 ; f_freemem last ram address result
@@ -1797,10 +1798,11 @@ dbgclr:     ldi   0eeh                  ; clear log to ee
             smi   20h
             plo   rb
 
-            ldi   ocrreg.1              ; clear saved ocr
-            phi   re
-            ldi   ocrreg.0
+            glo   re                    ; clear this unit's saved ocr
+            adi   ocrreg.0
             plo   re
+            ldi   ocrreg.1
+            phi   re
             ldi   0eeh
             str   re
 
@@ -1828,10 +1830,15 @@ dbgclr:     ldi   0eeh                  ; clear log to ee
             str   rb
             inc   rb
 
-            ldi   ocrreg.1              ; log saved ocr byte
-            phi   re
-            ldi   ocrreg.0
+            glo   ra                    ; log this unit's saved ocr byte,
+            smi   sdinctl.0             ;  found from the control pointer
+            shr                         ;  as in spiinit
+            shr
+            shr
+            adi   ocrreg.0
             plo   re
+            ldi   ocrreg.1
+            phi   re
             ldn   re
             str   rb
             inc   rb
@@ -4499,10 +4506,20 @@ waitini:    sep   r9                    ; send application escape, expect 0 or 1
             db    SD_CMD58
             bnz   get4err
 
-            ldi   ocrreg.1              ; pointer to byte to store ocr
-            phi   re
-            ldi   ocrreg.0
+          ; Each card has its own saved byte, since an SDSC card and an SDHC
+          ; card can be installed together. RA points into this unit's
+          ; 8-byte block of control values (advanced once by spiwake), so
+          ; the unit number is its offset from sdinctl divided by eight.
+
+            glo   ra                    ; unit number from control pointer
+            smi   sdinctl.0
+            shr
+            shr
+            shr
+            adi   ocrreg.0              ; pointer to this unit's ocr byte
             plo   re
+            ldi   ocrreg.1
+            phi   re
 
             sex   r3                    ; clock first response byte in
             out   SPI_DATA
@@ -4685,10 +4702,15 @@ sendblk:    sex   r2
           ; need to handle two cases here depending on what kind of card we
           ; detected during the initialization process.
 
-            ldi   ocrreg.1              ; get saved ccs flag from card init
-            phi   re
-            ldi   ocrreg.0
+            glo   ra                    ; get saved ccs flag from card init
+            smi   sdinctl.0             ;  for this unit, found the same way
+            shr                         ;  as in spiinit from the pointer to
+            shr                         ;  the unit's control values
+            shr
+            adi   ocrreg.0
             plo   re
+            ldi   ocrreg.1
+            phi   re
 
             ldn   re                    ; if set, card is high-capacity
             ani   40h
@@ -4896,6 +4918,13 @@ sdwrctl:    db    SPI_NONE+SPI_CS1
             db    SPI_NONE+SPI_CS0
             db    SPI_NONE+SPI_CS0+SPI_DMAOUT
             db    SPI_NONE+SPI_CS0
+
+          ; spiinit and sendblk find the unit number from RA's offset into
+          ; these tables, which relies on the whole table sharing one page.
+
+          #if (sdinctl.0) > 0f0h
+            #error SD control table crosses a page
+          #endif
 
 
             ; Compare two strings pointed to by RF and RF and return a byte
