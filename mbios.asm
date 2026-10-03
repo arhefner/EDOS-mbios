@@ -16,8 +16,6 @@
 
             ; Hardware and Build Target Definitions
 
-#define NO_GROUP       0                ; hardware defined - do not change
-
 ;define UART_DETECT                     ; use uart if no bit-bang cable
 
           ; INIT sets where the initialization part is assembled; it may be
