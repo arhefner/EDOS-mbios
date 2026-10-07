@@ -5036,6 +5036,7 @@ f_isalnum:  lbr   isalnum
 f_idnum:    lbr   idnum
 f_isterm:   lbr   isterm
 f_getdev:   lbr   getdev
+f_nbread:   lbr   read
 
 return:     adi   0
             sep   sret
